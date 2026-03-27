@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Five Habits"/>
+<meta name="theme-color" content="#ffffff"/>
+<title>Five Habits</title>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;background:#f9fafb;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+  .mono{font-family:'DM Mono','Courier New',monospace!important;}
+  button{font-family:inherit;cursor:pointer;}
+  button:focus,input:focus,textarea:focus{outline:none;}
+  textarea{font-family:inherit;}
+  input[type=number]::-webkit-inner-spin-button{opacity:1;}
+  ::-webkit-scrollbar{width:4px;}
+  ::-webkit-scrollbar-thumb{background:#e5e7eb;border-radius:99px;}
+  @keyframes cffall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}
+  @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .card{animation:fadein 0.2s ease;}
+  .habit-row{display:flex;align-items:center;gap:14px;cursor:pointer;user-select:none;}
+  .note-area{display:block;width:100%;margin-top:8px;resize:none;border-radius:8px;padding:8px 10px;font-family:'DM Sans',sans-serif;font-size:13px;color:#374151;line-height:1.5;box-sizing:border-box;min-height:58px;background:#fff;}
+  .tab-btn{flex:1;padding:13px 0;font-size:11px;font-family:'DM Mono',monospace;letter-spacing:0.09em;background:none;border:none;border-bottom:2px solid transparent;color:#9ca3af;cursor:pointer;transition:all 0.15s;}
+  .tab-btn.active{border-bottom:2px solid #4ade80;color:#111;}
+  .box{background:#f9fafb;border-radius:12px;padding:12px 14px;flex:1;min-width:0;}
+  .mono{font-family:'DM Mono',monospace;}
+  .sans{font-family:'DM Sans',sans-serif;}
+</style>
+
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ── Storage (localStorage for standalone) ────────────────────────────────────
+const Store = {
+  get: k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+// ── Data ──────────────────────────────────────────────────────────────────────
+let state = {
+  data:        Store.get("h5-data")        || {},
+  notes:       Store.get("h5-notes")       || {},
+  liftChoice:  Store.get("h5-lift")        || {},
+  weights:     Store.get("h5-weights")     || {},
+  startWeight: Store.get("h5-startweight") || null,
+  tab:         "today",
+  trendView:   "monthly",
+};
+
+function save(key, val) {
+  state[key] = val;
+  Store.set("h5-" + (key==="startWeight"?"startweight":key==="liftChoice"?"lift":key), val);
+  render();
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function pad(n){ return String(n).padStart(2,"0"); }
+function isSunday(){ return new Date().getDay()===0; }
+function sundayKey(offset=0){
+  const d=new Date(); d.setDate(d.getDate()-d.getDay()+offset*7);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function countComplete(dayData, liftChoiceForDay){
+  let n=0;
+  if(dayData.track)n++; if(dayData.drink)n++; if(dayData.walk)n++; if(dayData.sleep)n++;
+  if(dayData[liftChoiceForDay||"lift"])n++;
+  return n;
+}
+
+// ── SVG Icons ────────────────────────────────────────────────────────────────
+function svg(content, size=28){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${content}</svg>`;
+}
+const ICONS = {
+  barbell: svg(`<line x1="5" y1="16" x2="27" y2="16"/><rect x="2" y="12.5" width="4" height="7" rx="1"/><rect x="6" y="13.5" width="3" height="5" rx="1"/><rect x="26" y="12.5" width="4" height="7" rx="1"/><rect x="23" y="13.5" width="3" height="5" rx="1"/>`),
+  core:    svg(`<ellipse cx="16" cy="16" rx="9" ry="6"/><line x1="16" y1="10" x2="16" y2="22"/><line x1="7" y1="16" x2="25" y2="16"/><path d="M9 11.5 Q16 8 23 11.5"/><path d="M9 20.5 Q16 24 23 20.5"/>`),
+  sun:     svg(`<circle cx="16" cy="16" r="5"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="16" y1="25" x2="16" y2="29"/><line x1="3" y1="16" x2="7" y2="16"/><line x1="25" y1="16" x2="29" y2="16"/><line x1="7.8" y1="7.8" x2="10.5" y2="10.5"/><line x1="21.5" y1="21.5" x2="24.2" y2="24.2"/><line x1="24.2" y1="7.8" x2="21.5" y2="10.5"/><line x1="10.5" y1="21.5" x2="7.8" y2="24.2"/>`),
+  broccoli:svg(`<path d="M16 27 Q10 20 8 13 Q6 5 13 3 Q18 2 19 9 Q23 2 27 6 Q29 12 24 16 Q28 15 29 20 Q27 26 20 22 Q19 25 16 27Z"/><line x1="16" y1="27" x2="16" y2="14"/><path d="M16 20 Q12 16 13 10"/><path d="M16 18 Q20 14 21 9"/>`),
+  droplet: svg(`<path d="M16 4 C16 4 7 15 7 20 a9 9 0 0 0 18 0 C25 15 16 4 16 4Z"/><path d="M11 21 Q13 18.5 16 20"/>`),
+  moon:    svg(`<path d="M22 20 A10 10 0 1 1 12 6 A7 7 0 0 0 22 20Z"/>`),
+  scale:   svg(`<rect x="4" y="24" width="24" height="4" rx="2"/><line x1="16" y1="24" x2="16" y2="14"/><line x1="8" y1="14" x2="24" y2="14"/><path d="M8 14 Q6 10 4 14"/><path d="M24 14 Q26 10 28 14"/><circle cx="16" cy="12" r="2"/>`),
+};
+
+// ── Theme ────────────────────────────────────────────────────────────────────
+const T = {
+  lift:  {c:"#dc2626",bg:"#fef2f2",bd:"#f87171",lt:"#fee2e2"},
+  core:  {c:"#ea580c",bg:"#fff7ed",bd:"#fb923c",lt:"#ffedd5"},
+  walk:  {c:"#a16207",bg:"#fefce8",bd:"#facc15",lt:"#fef9c3"},
+  track: {c:"#16a34a",bg:"#f0fdf4",bd:"#4ade80",lt:"#dcfce7"},
+  drink: {c:"#1d4ed8",bg:"#eff6ff",bd:"#60a5fa",lt:"#dbeafe"},
+  sleep: {c:"#6d28d9",bg:"#f5f3ff",bd:"#a78bfa",lt:"#ede9fe"},
+  weigh: {c:"#111827",bg:"#f9fafb",bd:"#6b7280",lt:"#e5e7eb"},
+};
+
+// ── HTML builders ─────────────────────────────────────────────────────────────
+function habitCard(id, label, goal, iconKey, theme, checked, noteVal){
+  const th=T[theme]; const noteId=`note-${id}`;
+  return `
+  <div class="card" style="border:1.5px solid ${checked?th.bd:"#e5e7eb"};border-radius:18px;padding:16px 18px;background:${checked?th.bg:"#fff"};transition:all 0.22s ease;margin-bottom:10px;">
+    <div class="habit-row" onclick="toggleHabit('${id}')">
+      <div style="width:48px;height:48px;border-radius:14px;flex-shrink:0;background:${checked?th.lt:"#f9fafb"};display:flex;align-items:center;justify-content:center;color:${checked?th.c:"#9ca3af"};transition:all 0.2s;">${ICONS[iconKey]}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="mono" style="font-weight:600;font-size:14px;color:${checked?th.c:"#111"};letter-spacing:0.03em;transition:color 0.2s;">${label}</div>
+        <div class="sans" style="font-size:11px;color:#9ca3af;margin-top:2px;">${goal}</div>
+      </div>
+      <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;border:${checked?"none":"2px solid #e5e7eb"};background:${checked?th.c:"transparent"};display:flex;align-items:center;justify-content:center;transition:all 0.2s;">${checked?'<span style="color:#fff;font-size:14px;line-height:1;">✓</span>':''}</div>
+    </div>
+    <div style="margin-top:10px;padding-top:8px;border-top:1px solid ${checked?th.lt:"#f3f4f6"};">
+      <button onclick="toggleNote('${noteId}')" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;letter-spacing:0.06em;" id="${noteId}-btn">▼ add note</button>
+      <div id="${noteId}" style="display:none;">
+        <textarea class="note-area" style="border:1px solid ${th.bd};" placeholder="Optional note…" oninput="saveNote('${id}', this.value)">${noteVal||""}</textarea>
+
+```
+  </div>
+</div>
+```
+
+  </div>`;
+}
+
+function liftCard(){
+const choice = state.liftChoice[todayKey()];
+const td = state.data[todayKey()]||{};
+if(!choice){
+return ` <div class="card" style="border:1.5px solid #e5e7eb;border-radius:18px;padding:18px;margin-bottom:10px;"> <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:14px;">WHAT'S TODAY?</div> <div style="display:flex;gap:10px;"> <button onclick="chooseLift('lift')" style="flex:1;padding:16px 10px;border:1.5px solid ${T.lift.bd};border-radius:14px;background:${T.lift.bg};display:flex;flex-direction:column;align-items:center;gap:8px;transition:transform 0.12s;" onmouseenter="this.style.transform='scale(1.02)'" onmouseleave="this.style.transform='scale(1)'"> <span style="color:${T.lift.c};">${ICONS.barbell}</span> <span class="mono" style="font-size:13px;font-weight:600;color:${T.lift.c};">Lift Day</span> <span class="sans" style="font-size:11px;color:#9ca3af;">1 hour</span> </button> <button onclick="chooseLift('core')" style="flex:1;padding:16px 10px;border:1.5px solid ${T.core.bd};border-radius:14px;background:${T.core.bg};display:flex;flex-direction:column;align-items:center;gap:8px;transition:transform 0.12s;" onmouseenter="this.style.transform='scale(1.02)'" onmouseleave="this.style.transform='scale(1)'"> <span style="color:${T.core.c};">${ICONS.core}</span> <span class="mono" style="font-size:13px;font-weight:600;color:${T.core.c};">Core Day</span> <span class="sans" style="font-size:11px;color:#9ca3af;">30 min</span> </button> </div> </div>`;
+}
+const isLift=choice===“lift”; const th=isLift?T.lift:T.core;
+const checked=!!(td[choice]);
+const noteVal=(state.notes[todayKey()]||{})[choice]||””;
+const noteId=`note-${choice}`;
+return `
+
+  <div>
+    <div class="card" style="border:1.5px solid ${checked?th.bd:"#e5e7eb"};border-radius:18px;padding:16px 18px;background:${checked?th.bg:"#fff"};transition:all 0.22s ease;margin-bottom:4px;">
+      <div class="habit-row" onclick="toggleHabit('${choice}')">
+        <div style="width:48px;height:48px;border-radius:14px;flex-shrink:0;background:${checked?th.lt:"#f9fafb"};display:flex;align-items:center;justify-content:center;color:${checked?th.c:"#9ca3af"};">${isLift?ICONS.barbell:ICONS.core}</div>
+        <div style="flex:1;"><div class="mono" style="font-weight:600;font-size:14px;color:${checked?th.c:"#111"};">${isLift?"Lift":"Core"}</div><div class="sans" style="font-size:11px;color:#9ca3af;margin-top:2px;">${isLift?"1 hour · 4×/week":"30 min · off day"}</div></div>
+        <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;border:${checked?"none":"2px solid #e5e7eb"};background:${checked?th.c:"transparent"};display:flex;align-items:center;justify-content:center;">${checked?'<span style="color:#fff;font-size:14px;">✓</span>':''}</div>
+      </div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid ${checked?th.lt:"#f3f4f6"};">
+        <button onclick="toggleNote('${noteId}')" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;letter-spacing:0.06em;" id="${noteId}-btn">▼ add note</button>
+        <div id="${noteId}" style="display:none;"><textarea class="note-area" style="border:1px solid ${th.bd};" placeholder="Optional note…" oninput="saveNote('${choice}', this.value)">${noteVal}</textarea></div>
+      </div>
+    </div>
+    <button onclick="chooseLift(null)" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;letter-spacing:0.05em;padding-left:4px;margin-bottom:10px;">↩ change</button>
+  </div>`;
+}
+
+function weighCard(){
+const sunK=sundayKey(0), lastK=sundayKey(-1);
+const w=state.weights[sunK]||null, lw=state.weights[lastK]||null;
+const sw=state.startWeight;
+const th=T.weigh; const checked=!!w;
+const delta=w&&lw?(w-lw).toFixed(1):null;
+const totalLost=w&&sw?(sw-w).toFixed(1):null;
+return `
+
+  <div class="card" style="border:1.5px solid ${checked?th.bd:"#e5e7eb"};border-radius:18px;padding:16px 18px;background:${checked?th.bg:"#fff"};margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <div style="width:48px;height:48px;border-radius:14px;flex-shrink:0;background:${checked?th.lt:"#f9fafb"};display:flex;align-items:center;justify-content:center;color:${checked?th.c:"#9ca3af"};">${ICONS.scale}</div>
+      <div style="flex:1;"><div class="mono" style="font-weight:600;font-size:14px;color:${checked?th.c:"#111"};">Weigh In</div><div class="sans" style="font-size:11px;color:#9ca3af;margin-top:2px;">Every Sunday · log your weight</div></div>
+      ${checked?`<div style="width:28px;height:28px;border-radius:50%;background:${th.c};display:flex;align-items:center;justify-content:center;"><span style="color:#fff;font-size:14px;">✓</span></div>`:''}
+    </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid ${checked?th.lt:"#f3f4f6"};" id="weigh-body">
+      ${!checked?`<button onclick="showWeighInput()" style="font-size:12px;font-family:'DM Mono',monospace;color:${th.c};background:none;border:1px solid ${th.bd};border-radius:8px;padding:6px 14px;">+ Log Weight</button>`:''}
+      ${checked?`<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div><span class="mono" style="font-size:22px;font-weight:700;color:${th.c};">${w}</span><span class="sans" style="font-size:12px;color:#9ca3af;margin-left:4px;">lbs</span></div>
+        ${delta!==null?`<div class="mono" style="font-size:13px;font-weight:600;color:${parseFloat(delta)<=0?"#16a34a":"#dc2626"};">${parseFloat(delta)<=0?"▼":"▲"} ${Math.abs(delta)} lbs this week</div>`:''}
+        ${totalLost!==null&&parseFloat(totalLost)>0?`<div class="sans" style="font-size:11px;color:#6b7280;">${totalLost} lbs lost total</div>`:''}
+        <button onclick="showWeighInput()" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;margin-left:auto;">edit</button>
+      </div>`:''}
+      <div id="weigh-input-row" style="display:none;margin-top:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" step="0.1" id="weigh-input" placeholder="e.g. 241.5" style="flex:1;border:1.5px solid ${th.bd};border-radius:8px;padding:8px 12px;font-family:'DM Mono',monospace;font-size:15px;color:#111;"/>
+          <button onclick="saveWeight()" style="background:${th.c};color:#fff;border:none;border-radius:8px;padding:8px 16px;font-family:'DM Mono',monospace;font-size:13px;font-weight:600;">Save</button>
+          <button onclick="hideWeighInput()" style="background:none;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-family:'DM Mono',monospace;font-size:12px;color:#9ca3af;">✕</button>
+        </div>
+      </div>
+      ${!sw?`<div style="margin-top:10px;" id="start-weight-section">
+        <button onclick="showStartInput()" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;">▼ set starting weight</button>
+        <div id="start-input-row" style="display:none;margin-top:6px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span class="sans" style="font-size:11px;color:#9ca3af;">Starting:</span>
+            <input type="number" step="0.1" id="start-input" placeholder="e.g. 243" style="width:90px;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-family:'DM Mono',monospace;font-size:13px;"/>
+            <button onclick="saveStartWeight()" style="background:#111;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-family:'DM Mono',monospace;font-size:11px;">Set</button>
+          </div>
+        </div>
+      </div>`:''}
+    </div>
+  </div>`;
+}
+
+function weekGrid(){
+const today=new Date(); today.setHours(0,0,0,0);
+const thisSun=new Date(today); thisSun.setDate(today.getDate()-today.getDay());
+let html=`<div style="display:flex;gap:6px;">`;
+for(let i=0;i<7;i++){
+const d=new Date(thisSun); d.setDate(thisSun.getDate()+i);
+const k=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const isFuture=d>today, isToday=d.getTime()===today.getTime();
+const n=isFuture?0:countComplete(state.data[k]||{},state.liftChoice[k]);
+html+=`<div style="flex:1;text-align:center;"> <div class="mono" style="font-size:10px;color:${isFuture?"#d1d5db":"#9ca3af"};margin-bottom:6px;">${DAYS[d.getDay()]}</div> <div style="width:100%;aspect-ratio:1;border-radius:10px;background:${isFuture?"#fafafa":n>=5?"#4ade80":n>0?`rgba(74,222,128,${n/5*0.45})`:"#f3f4f6"};border:${isToday?"2px solid #4ade80":isFuture?"1.5px dashed #e5e7eb":"2px solid transparent"};display:flex;align-items:center;justify-content:center;font-size:12px;font-family:'DM Mono',monospace;font-weight:600;color:${isFuture?"#e5e7eb":n>=5?"#166534":"#6b7280"};"> ${isFuture?"·":n>0?n:"·"} </div> <div class="mono" style="font-size:10px;color:${isFuture?"#e5e7eb":"#d1d5db"};margin-top:4px;">${d.getDate()}</div> </div>`;
+}
+return html+`</div>`;
+}
+
+function weightChartSVG(){
+const wkeys=Object.keys(state.weights).sort();
+if(!wkeys.length) return `<div class="sans" style="color:#9ca3af;font-size:13px;padding:8px 0;">No weigh-ins logged yet.</div>`;
+const sorted=wkeys.map(k=>({k,v:state.weights[k]}));
+const vals=sorted.map(r=>r.v);
+const sw=state.startWeight;
+const allVals=sw?[…vals,sw]:vals;
+const min=Math.floor(Math.min(…allVals)-2), max=Math.ceil(Math.max(…allVals)+2), range=max-min||1;
+const W=340,H=130,P={t:14,b:26,l:38,r:10};
+const cw=W-P.l-P.r, ch=H-P.t-P.b;
+const pts=sorted.map((r,i)=>({x:P.l+(sorted.length===1?cw/2:i/(sorted.length-1)*cw),y:P.t+ch-((r.v-min)/range)*ch,v:r.v,k:r.k}));
+const pathD=pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(” “);
+const areaD=pts.length>1?`${pathD} L${pts[pts.length-1].x},${(P.t+ch).toFixed(1)} L${pts[0].x},${(P.t+ch).toFixed(1)} Z`:””;
+let dots=””;
+pts.forEach((p,i)=>{
+const parts=sorted[i].k.split(”-”); const d2=new Date(+parts[0],+parts[1]-1,+parts[2]);
+dots+=`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#fff" stroke="#111827" stroke-width="2"/> <text x="${p.x.toFixed(1)}" y="${(p.y-8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#6b7280" font-family="'DM Mono',monospace">${p.v}</text> <text x="${p.x.toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="9" fill="#9ca3af" font-family="'DM Mono',monospace">${MONTHS_SHORT[d2.getMonth()]} ${d2.getDate()}</text>`;
+});
+let grids=””;
+[0,0.5,1].forEach(t=>{
+const y=(P.t+ch*(1-t)).toFixed(1);
+grids+=`<line x1="${P.l}" y1="${y}" x2="${P.l+cw}" y2="${y}" stroke="#f3f4f6" stroke-width="1"/> <text x="${P.l-6}" y="${parseFloat(y)+4}" text-anchor="end" font-size="9" fill="#9ca3af" font-family="'DM Mono',monospace">${(min+range*t).toFixed(0)}</text>`;
+});
+return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;"> <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#111827" stop-opacity="0.1"/><stop offset="100%" stop-color="#111827" stop-opacity="0"/></linearGradient></defs> ${grids}${areaD?`<path d="${areaD}" fill="url(#wg)"/>`:""} <path d="${pathD}" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/> ${dots} </svg>`;
+}
+
+function getMonthlyRows(){
+const byMonth={};
+Object.entries(state.weights).sort(([a],[b])=>a.localeCompare(b)).forEach(([k,v])=>{byMonth[k.slice(0,7)]=v;});
+return Object.entries(byMonth).sort(([a],[b])=>a.localeCompare(b)).map(([ym,v])=>{
+const [yr,mo]=ym.split(”-”);
+return {label:`${MONTHS_SHORT[parseInt(mo)-1]} '${yr.slice(2)}`,value:v};
+});
+}
+function getYearlyRows(){
+const byYear={};
+Object.entries(state.weights).sort(([a],[b])=>a.localeCompare(b)).forEach(([k,v])=>{byYear[k.slice(0,4)]=v;});
+return Object.entries(byYear).sort(([a],[b])=>a.localeCompare(b)).map(([yr,v])=>({label:yr,value:v}));
+}
+
+function sparklineSVG(points, width=120, height=36){
+if(points.length<2) return “”;
+const min=Math.min(…points),max=Math.max(…points),range=max-min||1;
+const pad2=4,cw=width-pad2*2,ch=height-pad2*2;
+const xs=points.map((_,i)=>pad2+i/(points.length-1)*cw);
+const ys=points.map(v=>pad2+ch-((v-min)/range)*ch);
+const d=xs.map((x,i)=>`${i===0?"M":"L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(” “);
+const trend=points[points.length-1]-points[0];
+const tc=trend<0?”#16a34a”:trend>0?”#dc2626”:”#9ca3af”;
+return `<svg width="${width}" height="${height}" style="overflow:visible;"> <path d="${d}" fill="none" stroke="${tc}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/> <circle cx="${xs[xs.length-1].toFixed(1)}" cy="${ys[ys.length-1].toFixed(1)}" r="3" fill="${tc}"/> </svg>`;
+}
+
+function trendTable(rows){
+if(!rows.length) return `<div class="sans" style="color:#9ca3af;font-size:12px;">Not enough data yet — keep logging Sundays!</div>`;
+return `<div style="border-radius:12px;overflow:hidden;border:1px solid #f3f4f6;"> ${rows.map((row,i)=>{ const prev=i>0?rows[i-1].value:null; const delta=prev!==null?(row.value-prev).toFixed(1):null; const isDown=delta!==null&&parseFloat(delta)<0; const isUp=delta!==null&&parseFloat(delta)>0; return `<div style=“display:flex;align-items:center;padding:10px 14px;background:${i%2===0?”#fff”:”#fafafa”};border-bottom:${i<rows.length-1?“1px solid #f3f4f6”:“none”};”>
+<div class="mono" style="flex:1;font-size:12px;color:#374151;">${row.label}</div>
+<div class="mono" style="font-size:14px;font-weight:600;color:#111;min-width:52px;text-align:right;">${row.value} <span style="font-size:10px;color:#9ca3af;font-weight:400;">lbs</span></div>
+<div class=“mono” style=“min-width:72px;text-align:right;font-size:12px;font-weight:600;color:${isDown?”#16a34a”:isUp?”#dc2626”:”#9ca3af”};padding-left:12px;”>
+${delta===null?”—”:`${isDown?"▼":"▲"} ${Math.abs(delta)}`}
+</div>
+</div>`;
+}).join(””)}
+
+  </div>`;
+}
+
+function statsTab(){
+const keys=Object.keys(state.data).sort();
+const wkeys=Object.keys(state.weights).sort();
+const thisSunK=sundayKey(0),lastSunK=sundayKey(-1);
+const thisW=state.weights[thisSunK]||null,lastW=state.weights[lastSunK]||null;
+const weekDelta=thisW&&lastW?(thisW-lastW).toFixed(1):null;
+const displayStart=state.startWeight||(wkeys.length?state.weights[wkeys[0]]:null);
+const currentW=wkeys.length?state.weights[wkeys[wkeys.length-1]]:null;
+const totalLost=currentW&&displayStart?(displayStart-currentW).toFixed(1):null;
+const total=keys.length;
+const perfect=keys.filter(k=>countComplete(state.data[k],state.liftChoice[k])===5).length;
+let cur=0,best=0,tmp=0;
+keys.forEach((k,i)=>{if(countComplete(state.data[k],state.liftChoice[k])===5){tmp++;best=Math.max(best,tmp);if(i===keys.length-1)cur=tmp;}else{if(i===keys.length-1)cur=0;tmp=0;}});
+const totals={lift:0,core:0,walk:0,track:0,drink:0,sleep:0};
+keys.forEach(k=>{[“track”,“drink”,“walk”,“sleep”].forEach(id=>{if(state.data[k]?.[id])totals[id]++;});const lk=state.liftChoice[k];if(lk&&state.data[k]?.[lk])totals[lk]++;});
+const monthlyRows=getMonthlyRows(), yearlyRows=getYearlyRows();
+const tv=state.trendView;
+const sparkPts=(tv===“monthly”?monthlyRows:yearlyRows).map(r=>r.value);
+const STAT_ITEMS=[{id:“lift”,label:“Lift”,c:T.lift.c},{id:“core”,label:“Core”,c:T.core.c},{id:“walk”,label:“Walk”,c:T.walk.c},{id:“track”,label:“Track”,c:T.track.c},{id:“drink”,label:“Drink”,c:T.drink.c},{id:“sleep”,label:“Sleep”,c:T.sleep.c}];
+const sw=state.startWeight;
+
+return `
+
+  <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:12px;">WEIGHT TRACKER</div>
+  <div style="background:#f9fafb;border-radius:16px;padding:16px;margin-bottom:6px;">
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <div class="box"><div class="mono" style="font-size:19px;font-weight:700;color:#111;">${displayStart||"—"}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Starting</div><div style="font-size:10px;color:#d1d5db;">lbs</div></div>
+      <div class="box"><div class="mono" style="font-size:19px;font-weight:700;color:#111;">${currentW||"—"}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Current</div><div style="font-size:10px;color:#d1d5db;">lbs</div></div>
+      <div class="box"><div class="mono" style="font-size:19px;font-weight:700;color:#16a34a;">${totalLost&&parseFloat(totalLost)>0?totalLost:"—"}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Lost</div><div style="font-size:10px;color:#d1d5db;">lbs total</div></div>
+    </div>
+    ${weekDelta!==null?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;background:${parseFloat(weekDelta)<=0?"#f0fdf4":"#fef2f2"};border-radius:10px;border:1px solid ${parseFloat(weekDelta)<=0?"#4ade80":"#f87171"};">
+      <span style="font-size:16px;">${parseFloat(weekDelta)<=0?"📉":"📈"}</span>
+      <span class="mono" style="font-size:12px;font-weight:600;color:${parseFloat(weekDelta)<=0?"#16a34a":"#dc2626"};">${parseFloat(weekDelta)<=0?"Down":"Up"} ${Math.abs(weekDelta)} lbs this week</span>
+      <span class="sans" style="font-size:11px;color:#9ca3af;margin-left:auto;">${lastW} → ${thisW}</span>
+    </div>`:""}
+    ${weightChartSVG()}
+    <div style="margin-top:10px;">
+      ${!sw?`<button onclick="toggleStartInput()" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;">+ set starting weight</button>
+      <div id="start-input-stats" style="display:none;margin-top:6px;"><div style="display:flex;gap:8px;align-items:center;"><span class="sans" style="font-size:11px;color:#9ca3af;">Starting:</span><input type="number" step="0.1" id="start-input-s" placeholder="e.g. 243" style="width:90px;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-family:'DM Mono',monospace;font-size:13px;"/><button onclick="saveStartWeightStats()" style="background:#111;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-family:'DM Mono',monospace;font-size:11px;">Set</button></div></div>`
+      :`<button onclick="editStartWeight()" style="font-size:10px;color:#9ca3af;background:none;border:none;font-family:'DM Mono',monospace;">✎ update starting weight</button>
+      <div id="start-input-stats" style="display:none;margin-top:6px;"><div style="display:flex;gap:8px;align-items:center;"><span class="sans" style="font-size:11px;color:#9ca3af;">Starting:</span><input type="number" step="0.1" id="start-input-s" value="${sw}" style="width:90px;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-family:'DM Mono',monospace;font-size:13px;"/><button onclick="saveStartWeightStats()" style="background:#111;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-family:'DM Mono',monospace;font-size:11px;">Set</button><button onclick="document.getElementById('start-input-stats').style.display='none'" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:12px;">✕</button></div></div>`}
+    </div>
+  </div>
+
+  <div style="background:#f9fafb;border-radius:16px;padding:16px;margin-bottom:20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;">TRENDING</div>
+      <div style="display:flex;background:#efefef;border-radius:8px;padding:2px;gap:2px;">
+        <button onclick="setTrendView('monthly')" style="font-size:10px;font-family:'DM Mono',monospace;padding:4px 10px;border:none;border-radius:6px;cursor:pointer;background:${tv==="monthly"?"#fff":"transparent"};color:${tv==="monthly"?"#111":"#9ca3af"};font-weight:${tv==="monthly"?600:400};box-shadow:${tv==="monthly"?"0 1px 3px rgba(0,0,0,0.1)":"none"};">Monthly</button>
+        <button onclick="setTrendView('yearly')" style="font-size:10px;font-family:'DM Mono',monospace;padding:4px 10px;border:none;border-radius:6px;cursor:pointer;background:${tv==="yearly"?"#fff":"transparent"};color:${tv==="yearly"?"#111":"#9ca3af"};font-weight:${tv==="yearly"?600:400};box-shadow:${tv==="yearly"?"0 1px 3px rgba(0,0,0,0.1)":"none"};">Yearly</button>
+      </div>
+    </div>
+    ${sparkPts.length>=2?`<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 14px;background:#fff;border-radius:10px;border:1px solid #f3f4f6;">
+      <div><div class="mono" style="font-size:10px;color:#9ca3af;margin-bottom:2px;">TREND</div>
+      <div class="mono" style="font-size:13px;font-weight:600;color:${(sparkPts[sparkPts.length-1]-sparkPts[0])<0?"#16a34a":"#dc2626"};">${(sparkPts[sparkPts.length-1]-sparkPts[0])<0?"▼ Losing":"▲ Gaining"} ${Math.abs(sparkPts[sparkPts.length-1]-sparkPts[0]).toFixed(1)} lbs over ${sparkPts.length} ${tv==="monthly"?"months":"years"}</div></div>
+      <div style="margin-left:auto;">${sparklineSVG(sparkPts)}</div>
+    </div>`:""}
+    ${tv==="monthly"?trendTable(monthlyRows):trendTable(yearlyRows)}
+  </div>
+
+  <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:12px;">HABIT STATS</div>
+  <div style="display:flex;gap:8px;margin-bottom:20px;">
+    <div class="box"><div class="mono" style="font-size:19px;font-weight:700;">${perfect}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Perfect Days</div><div style="font-size:10px;color:#d1d5db;">of ${total}</div></div>
+    <div class="box"><div class="mono" style="font-size:19px;font-weight:700;">${cur}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Streak</div><div style="font-size:10px;color:#d1d5db;">current</div></div>
+    <div class="box"><div class="mono" style="font-size:19px;font-weight:700;">${best}</div><div class="sans" style="font-size:10px;color:#9ca3af;margin-top:2px;">Best</div><div style="font-size:10px;color:#d1d5db;">all-time</div></div>
+  </div>
+  <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:14px;">CONSISTENCY</div>
+  ${STAT_ITEMS.map(h=>{
+    const denom=(h.id==="lift"||h.id==="core")?Math.max(1,keys.filter(k=>state.liftChoice[k]===h.id).length):total;
+    const pct=Math.round((totals[h.id]/Math.max(1,denom))*100);
+    return `<div style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;margin-bottom:5px;"><span class="sans" style="font-size:13px;color:#374151;font-weight:500;">${h.label}</span><span class="mono" style="font-size:11px;color:#9ca3af;">${pct}%</span></div><div style="height:6px;background:#f3f4f6;border-radius:99px;"><div style="height:100%;width:${pct}%;background:${h.c};border-radius:99px;transition:width 0.5s ease;"></div></div></div>`;
+  }).join("")}`;
+}
+
+function weekTab(){
+const today=new Date(); today.setHours(0,0,0,0);
+const thisSun=new Date(today); thisSun.setDate(today.getDate()-today.getDay());
+let noteRows=””;
+for(let i=0;i<7;i++){
+const d=new Date(thisSun); d.setDate(thisSun.getDate()+i);
+const k=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const dn=state.notes[k]||{};
+if(!Object.values(dn).some(n=>n?.trim()))continue;
+noteRows+=`<div style="margin-bottom:18px;"><div class="mono" style="font-size:10px;color:#6b7280;margin-bottom:8px;">${DAYS[d.getDay()]} ${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}</div>`;
+[“lift”,“core”,“walk”,“track”,“drink”,“sleep”].forEach(id=>{if(dn[id]?.trim())noteRows+=`<div style="display:flex;gap:10px;margin-bottom:6px;"><span class="mono" style="font-size:10px;color:#9ca3af;min-width:38px;text-transform:capitalize;">${id}</span><span class="sans" style="font-size:13px;color:#374151;">${dn[id]}</span></div>`;});
+noteRows+=”</div>”;
+}
+return `
+
+  <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:14px;">THIS WEEK (SUN–SAT)</div>
+  ${weekGrid()}
+  <div style="margin-top:28px;">
+    <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.1em;margin-bottom:14px;">THIS WEEK'S NOTES</div>
+    ${noteRows||`<div class="sans" style="color:#9ca3af;font-size:13px;">No notes this week.</div>`}
+  </div>`;
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(){
+const today=todayKey();
+const td=state.data[today]||{};
+const tn=state.notes[today]||{};
+const tl=state.liftChoice[today]||null;
+const sun=isSunday();
+const thisSunK=sundayKey(0);
+const todayW=state.weights[thisSunK]||null;
+const habitCount=countComplete(td,tl);
+const totalPossible=sun?6:5;
+const allDone=habitCount===5&&(sun?!!todayW:true);
+const displayCount=habitCount+(sun&&todayW?1:0);
+let streak=0;
+{const d=new Date();for(let i=0;i<365;i++){const k=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;const s=d.getDay()===0;const done=countComplete(state.data[k]||{},state.liftChoice[k])===5&&(s?(!!state.weights[k]):true);if(k===today&&!allDone){d.setDate(d.getDate()-1);continue;}if(done){streak++;d.setDate(d.getDate()-1);}else break;}}
+const now=new Date(); const dateStr=`${DAYS[now.getDay()]} ${MONTHS_SHORT[now.getMonth()]} ${now.getDate()}`;
+
+let content=””;
+if(state.tab===“today”){
+content=(sun?weighCard():””);
+content+=liftCard();
+content+=habitCard(“walk”,“Walk”,“10,000 steps / day”,“sun”,“walk”,!!td.walk,tn.walk||””);
+content+=habitCard(“track”,“Track”,“2,400 cal · 200g protein”,“broccoli”,“track”,!!td.track,tn.track||””);
+content+=habitCard(“drink”,“Drink”,“1 gallon / day”,“droplet”,“drink”,!!td.drink,tn.drink||””);
+content+=habitCard(“sleep”,“Sleep”,“8 hours / night”,“moon”,“sleep”,!!td.sleep,tn.sleep||””);
+if(allDone) content+=`<div style="margin-top:6px;padding:20px;text-align:center;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #4ade80;border-radius:18px;"><div style="font-size:26px;margin-bottom:6px;">🎯</div><div class="sans" style="font-weight:600;color:#166534;font-size:15px;">Perfect day. Every single one counts.</div></div>`;
+} else if(state.tab===“week”){
+content=weekTab();
+} else {
+content=statsTab();
+}
+
+document.getElementById(“root”).innerHTML=`
+
+  <div style="max-width:430px;margin:0 auto;min-height:100vh;background:#fff;display:flex;flex-direction:column;">
+    <div style="padding:env(safe-area-inset-top,32px) 24px 18px;padding-top:max(env(safe-area-inset-top),32px);border-bottom:1px solid #f3f4f6;">
+      <div class="mono" style="font-size:10px;color:#9ca3af;letter-spacing:0.14em;margin-bottom:5px;">${dateStr.toUpperCase()}</div>
+      <div class="sans" style="font-size:26px;font-weight:600;color:#111;letter-spacing:-0.02em;">Five Habits</div>
+      ${sun?`<div class="mono" style="margin-top:4px;font-size:11px;color:#6d28d9;letter-spacing:0.06em;">⚖ Sunday — weigh-in day</div>`:""}
+      <div style="margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+          <span class="mono" style="font-size:12px;color:#9ca3af;">${displayCount} / ${totalPossible}</span>
+          ${streak>0?`<span class="mono" style="font-size:12px;color:#16a34a;">🔥 ${streak} day streak</span>`:""}
+        </div>
+        <div style="height:4px;background:#f3f4f6;border-radius:99px;">
+          <div style="height:100%;border-radius:99px;background:linear-gradient(90deg,#f87171,#fb923c,#facc15,#4ade80);width:${(displayCount/totalPossible)*100}%;transition:width 0.35s ease;"></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;border-bottom:1px solid #f3f4f6;">
+      <button class="tab-btn ${state.tab==="today"?"active":""}" onclick="setTab('today')">TODAY</button>
+      <button class="tab-btn ${state.tab==="week"?"active":""}" onclick="setTab('week')">WEEK</button>
+      <button class="tab-btn ${state.tab==="stats"?"active":""}" onclick="setTab('stats')">STATS</button>
+    </div>
+    <div style="flex:1;padding:20px 20px 64px;overflow-y:auto;">${content}</div>
+  </div>`;
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function setTab(t){ state.tab=t; render(); }
+function setTrendView(v){ state.trendView=v; render(); }
+
+function toggleHabit(id){
+const today=todayKey();
+const newData={…state.data,[today]:{…(state.data[today]||{}),[id]:!(state.data[today]||{})[id]}};
+const prev=countComplete(state.data[today]||{},state.liftChoice[today]);
+save(“data”,newData);
+const now2=countComplete(newData[today]||{},state.liftChoice[today]);
+const sun=isSunday(); const todayW=state.weights[sundayKey(0)]||null;
+if(now2===5&&(sun?!!todayW:true)&&prev<5) confetti();
+}
+
+function chooseLift(choice){
+const today=todayKey();
+const old=state.liftChoice[today];
+const newData={…state.data};
+if(!newData[today])newData[today]={};
+if(old&&old!==choice)newData[today][old]=false;
+save(“liftChoice”,{…state.liftChoice,[today]:choice});
+save(“data”,newData);
+}
+
+function toggleNote(id){
+const el=document.getElementById(id);
+const btn=document.getElementById(id+”-btn”);
+if(!el)return;
+const open=el.style.display===“none”;
+el.style.display=open?“block”:“none”;
+if(btn)btn.textContent=open?“▲ hide note”:“▼ add note”;
+if(open)el.querySelector(“textarea”)?.focus();
+}
+
+function saveNote(habitId, val){
+const today=todayKey();
+save(“notes”,{…state.notes,[today]:{…(state.notes[today]||{}),[habitId]:val}});
+}
+
+function showWeighInput(){
+const r=document.getElementById(“weigh-input-row”);
+if(r){r.style.display=“block”; document.getElementById(“weigh-input”)?.focus();}
+}
+function hideWeighInput(){ const r=document.getElementById(“weigh-input-row”); if(r)r.style.display=“none”; }
+function saveWeight(){
+const el=document.getElementById(“weigh-input”);
+if(!el)return;
+const v=parseFloat(el.value);
+if(!isNaN(v)&&v>0){ save(“weights”,{…state.weights,[sundayKey(0)]:v}); confetti(); }
+}
+function showStartInput(){ const el=document.getElementById(“start-input-row”); if(el)el.style.display=“block”; }
+function saveStartWeight(){
+const el=document.getElementById(“start-input”);
+if(!el)return;
+const v=parseFloat(el.value);
+if(!isNaN(v)&&v>0) save(“startWeight”,v);
+}
+function toggleStartInput(){ const el=document.getElementById(“start-input-stats”); if(el)el.style.display=el.style.display===“none”?“block”:“none”; }
+function editStartWeight(){ const el=document.getElementById(“start-input-stats”); if(el)el.style.display=“block”; }
+function saveStartWeightStats(){
+const el=document.getElementById(“start-input-s”);
+if(!el)return;
+const v=parseFloat(el.value);
+if(!isNaN(v)&&v>0) save(“startWeight”,v);
+}
+
+// ── Confetti ──────────────────────────────────────────────────────────────────
+function confetti(){
+const colors=[”#f87171”,”#fb923c”,”#facc15”,”#4ade80”,”#60a5fa”,”#a78bfa”,”#34d399”];
+const container=document.createElement(“div”);
+container.style.cssText=“position:fixed;inset:0;pointer-events:none;z-index:1000;overflow:hidden;”;
+for(let i=0;i<34;i++){
+const p=document.createElement(“div”);
+const size=6+Math.random()*9;
+p.style.cssText=`position:absolute;top:-16px;left:${Math.random()*100}%;width:${size}px;height:${size}px;background-color:${colors[i%colors.length]};border-radius:${i%3===0?"50%":"2px"};animation:cffall ${1.8+Math.random()*1.2}s ${Math.random()*0.9}s ease-in forwards;`;
+container.appendChild(p);
+}
+document.body.appendChild(container);
+setTimeout(()=>container.remove(),3500);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.onerror = function(msg, src, line) {
+document.getElementById(“root”).innerHTML = `<div style="padding:40px 24px;font-family:monospace;font-size:13px;color:#dc2626;background:#fff;"><strong>Error:</strong> ${msg}<br/><br/>Line: ${line}</div>`;
+};
+try { render(); } catch(e) {
+document.getElementById(“root”).innerHTML = `<div style="padding:40px 24px;font-family:monospace;font-size:13px;color:#dc2626;background:#fff;"><strong>Render error:</strong><br/>${e.message}</div>`;
+}
+</script>
+
+</body>
+</html>
